@@ -30,7 +30,12 @@ def _seed_default_restaurant():
         name="Гастроном",
         address="ул. Пушкина, д. 10",
         phone="+7 (999) 123-45-67",
-        telegram_account="gastronom_manager"
+        telegram_account="gastronom_manager",
+        opening_time="12:00",
+        closing_time="23:00",
+        cuisine_type="европейская, авторская",
+        average_check="2500-3500 рублей",
+        features="живая музыка по пятницам и субботам, летняя веранда"
     )
 
     tables_config = [
