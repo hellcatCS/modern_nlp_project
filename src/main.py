@@ -18,13 +18,13 @@ def sanitize_text(text: str) -> str:
 
 class ChatSession:
     def __init__(self):
-        self.llm = LLMClient()
+        self.restaurant = Restaurant.get_or_none(Restaurant.id == 1)
+        self.llm = LLMClient(self.restaurant)
         self.user = self._create_user()
         logger.info(f"Создан новый пользователь: {self.user.id}")
 
     def _create_user(self) -> User:
-        restaurant = Restaurant.get_or_none(Restaurant.id == 1)
-        return User.create(restaurant=restaurant)
+        return User.create(restaurant=self.restaurant)
 
     def _save_message(self, role: str, content: str):
         Message.create(user=self.user, role=role, content=sanitize_text(content))
@@ -68,7 +68,8 @@ def main():
     init_db()
 
     session = ChatSession()
-    print("Добро пожаловать в ресторан 'Гастроном'! Чем могу помочь?")
+    restaurant_name = session.restaurant.name if session.restaurant else "наш ресторан"
+    print(f"Добро пожаловать в ресторан '{restaurant_name}'! Чем могу помочь?")
     print("(Для выхода введите 'exit' или нажмите Ctrl+C)\n")
 
     try:

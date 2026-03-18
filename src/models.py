@@ -19,6 +19,10 @@ class Restaurant(BaseModel):
     telegram_account = CharField(max_length=100, unique=True)
     opening_time = TimeField(default="12:00")
     closing_time = TimeField(default="23:00")
+    cuisine_type = CharField(max_length=255, default="европейская")
+    average_check = CharField(max_length=100, default="2000-3000 рублей")
+    features = TextField(null=True)
+    system_prompt = TextField(null=True)
     created_at = DateTimeField(default=datetime.utcnow)
 
 

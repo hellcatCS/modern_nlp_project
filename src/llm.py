@@ -1,17 +1,17 @@
 import logging
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.messages import ToolMessage
-                
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+
 from src.config import settings
 from src.functions import TOOLS
-from src.prompts import SYSTEM_PROMPT
+from src.prompts import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    def __init__(self):
+    def __init__(self, restaurant):
+        self.restaurant = restaurant
         llm = ChatOpenAI(
             model=settings.openai_model,
             api_key=settings.openai_api_key
@@ -20,7 +20,8 @@ class LLMClient:
         self.tools_by_name = {t.name: t for t in TOOLS}
 
     def _convert_history(self, messages: list[dict]) -> list:
-        result = [SystemMessage(content=SYSTEM_PROMPT)]
+        system_prompt = build_system_prompt(self.restaurant)
+        result = [SystemMessage(content=system_prompt)]
         for m in messages:
             if m["role"] == "user":
                 result.append(HumanMessage(content=m["content"]))
