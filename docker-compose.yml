@@ -16,15 +16,33 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   app:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openai/gpt-oss-120b}
+      - OPENROUTER_EMBEDDING_MODEL=${OPENROUTER_EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/restaurant_bot
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-restaurant_knowledge}
+      - RAG_TOP_K=${RAG_TOP_K:-4}
+      - RAG_MIN_SCORE=${RAG_MIN_SCORE:-0.25}
       - LANG=C.UTF-8
       - LC_ALL=C.UTF-8
       - PYTHONIOENCODING=utf-8
@@ -33,3 +51,4 @@ services:
 
 volumes:
   postgres_data:
+  qdrant_data:

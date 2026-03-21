@@ -1,14 +1,64 @@
 import logging
+import secrets
+import string
+from datetime import datetime, timedelta
 from langchain_core.tools import tool
 
+from src.config import settings
+from src.knowledge import KnowledgeManager
 from src.models import Restaurant, Table, Booking
 
 logger = logging.getLogger(__name__)
 
 BOOKING_DURATION_HOURS = 2
+BOOKING_CODE_ALPHABET = "".join(
+    ch for ch in (string.ascii_uppercase + string.digits) if ch not in {"O", "0", "I", "1"}
+)
+_knowledge_manager: KnowledgeManager | None = None
 
 
-def find_available_table(restaurant_id: int, date: str, time: str, guests_count: int):
+def set_knowledge_manager(manager: KnowledgeManager):
+    global _knowledge_manager
+    _knowledge_manager = manager
+
+
+def _get_knowledge_manager() -> KnowledgeManager:
+    global _knowledge_manager
+    if _knowledge_manager is None:
+        _knowledge_manager = KnowledgeManager()
+    return _knowledge_manager
+
+def _validate_booking_slot(restaurant: Restaurant, date: str, time: str):
+    try:
+        start_at = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        end_at = start_at + timedelta(hours=BOOKING_DURATION_HOURS)
+    except ValueError:
+        return None, None, "Неверный формат даты/времени. Используйте YYYY-MM-DD и HH:MM"
+
+    if start_at.minute % 30 != 0:
+        return None, None, "Время брони должно быть кратно 30 минутам (например, 18:00, 18:30)"
+
+    opening = restaurant.opening_time
+    closing = restaurant.closing_time
+    if start_at.date() != end_at.date() or not (opening <= start_at.time() and end_at.time() <= closing):
+        opening = str(restaurant.opening_time)[:5]
+        closing = str(restaurant.closing_time)[:5]
+        return None, None, f"Бронирование возможно только в рабочие часы: {opening}–{closing}"
+
+    return start_at, end_at, None
+
+
+def _generate_booking_code(length: int = 7) -> str:
+    for _ in range(50):
+        code = "".join(secrets.choice(BOOKING_CODE_ALPHABET) for _ in range(length))
+        if not Booking.get_or_none(Booking.booking_code == code):
+            return code
+    raise RuntimeError("Не удалось сгенерировать уникальный booking_id")
+
+
+def find_available_table(
+    restaurant_id: int, start_at, end_at, guests_count: int
+):
     tables = (
         Table
         .select()
@@ -26,8 +76,8 @@ def find_available_table(restaurant_id: int, date: str, time: str, guests_count:
             .select()
             .where(
                 (Booking.table == table) &
-                (Booking.date == date) &
-                (Booking.time == time) &
+                (Booking.start_at < end_at) &
+                (Booking.end_at > start_at) &
                 (Booking.status == "confirmed")
             )
             .count()
@@ -38,7 +88,7 @@ def find_available_table(restaurant_id: int, date: str, time: str, guests_count:
     return None
 
 
-def get_available_tables_info(restaurant_id: int, date: str, time: str) -> dict:
+def get_available_tables_info(restaurant_id: int, start_at, end_at, guests_count: int) -> dict:
     result = {2: 0, 4: 0, 6: 0}
 
     tables = (
@@ -46,6 +96,7 @@ def get_available_tables_info(restaurant_id: int, date: str, time: str) -> dict:
         .select()
         .where(
             (Table.restaurant == restaurant_id) &
+            (Table.capacity >= guests_count) &
             (Table.is_active == True)
         )
     )
@@ -56,8 +107,8 @@ def get_available_tables_info(restaurant_id: int, date: str, time: str) -> dict:
             .select()
             .where(
                 (Booking.table == table) &
-                (Booking.date == date) &
-                (Booking.time == time) &
+                (Booking.start_at < end_at) &
+                (Booking.end_at > start_at) &
                 (Booking.status == "confirmed")
             )
             .count()
@@ -69,22 +120,27 @@ def get_available_tables_info(restaurant_id: int, date: str, time: str) -> dict:
 
 
 @tool
-def check_availability(date: str, time: str) -> str:
+def check_availability(date: str, time: str, guests_count: int) -> str:
     """Проверить наличие свободных столиков на указанную дату и время.
 
     Args:
         date: Дата (YYYY-MM-DD)
         time: Время (HH:MM)
+        guests_count: Количество гостей
     """
     restaurant = Restaurant.get_or_none(Restaurant.id == 1)
     if not restaurant:
         return "Ресторан не найден"
 
-    available = get_available_tables_info(restaurant.id, date, time)
+    start_at, end_at, error = _validate_booking_slot(restaurant, date, time)
+    if error:
+        return error
+
+    available = get_available_tables_info(restaurant.id, start_at, end_at, guests_count)
     total = sum(available.values())
 
     if total == 0:
-        return f"К сожалению, на {date} в {time} свободных столиков нет"
+        return f"К сожалению, на {date} в {time} свободных столиков на {guests_count} гостей нет"
 
     parts = []
     if available[2] > 0:
@@ -114,10 +170,14 @@ def create_booking(guest_name: str, phone: str, date: str, time: str, guests_cou
     if not restaurant:
         return "Ошибка: ресторан не найден"
 
-    table = find_available_table(restaurant.id, date, time, guests_count)
+    start_at, end_at, error = _validate_booking_slot(restaurant, date, time)
+    if error:
+        return error
+
+    table = find_available_table(restaurant.id, start_at, end_at, guests_count)
 
     if not table:
-        available = get_available_tables_info(restaurant.id, date, time)
+        available = get_available_tables_info(restaurant.id, start_at, end_at, guests_count)
         if sum(available.values()) == 0:
             return f"К сожалению, на {date} в {time} нет свободных столиков. Попробуйте выбрать другое время."
 
@@ -125,50 +185,120 @@ def create_booking(guest_name: str, phone: str, date: str, time: str, guests_cou
 
     booking = Booking.create(
         table=table,
+        booking_code=_generate_booking_code(),
         guest_name=guest_name,
         phone=phone,
         date=date,
         time=time,
+        start_at=start_at,
+        end_at=end_at,
         guests_count=guests_count
     )
 
-    return f"Бронирование подтверждено! Столик №{table.table_number} на {guests_count} гостей, {date} в {time}. Номер брони: {booking.id}"
+    return (
+        f"Бронирование подтверждено! Столик №{table.table_number} на {guests_count} гостей, "
+        f"{date} в {time}. booking_id={booking.booking_code}"
+    )
 
 
 @tool
-def cancel_booking(phone: str, date: str) -> str:
+def cancel_booking(booking_id: str) -> str:
     """Отменить существующее бронирование.
 
     Args:
-        phone: Номер телефона, на который было сделано бронирование
-        date: Дата бронирования для отмены (YYYY-MM-DD)
+        booking_id: Публичный идентификатор брони (буквы+цифры, 6-7 символов)
     """
-    logger.info(f"Отмена бронирования: {phone}, {date}")
+    logger.info(f"Отмена бронирования: booking_id={booking_id}")
+    value = str(booking_id).strip().upper()
 
     booking = Booking.get_or_none(
-        (Booking.phone == phone) &
-        (Booking.date == date) &
+        (Booking.booking_code == value) &
         (Booking.status == "confirmed")
     )
+    if not booking and value.isdigit():
+        booking = Booking.get_or_none(
+            (Booking.id == int(value)) &
+            (Booking.status == "confirmed")
+        )
 
     if not booking:
-        return f"Бронирование на {date} по номеру {phone} не найдено"
+        return f"Активное бронирование с booking_id={booking_id} не найдено"
 
     booking.status = "cancelled"
     booking.save()
-
-    return f"Бронирование на {date} в {booking.time} успешно отменено"
+    public_id = booking.booking_code or str(booking.id)
+    return f"Бронирование booking_id={public_id} на {booking.date} в {booking.time} успешно отменено"
 
 
 @tool
 def transfer_to_manager(reason: str) -> str:
-    """Передать диалог живому менеджеру. Используй когда не уверен в ответе, не понимаешь запрос, или гость просит связаться с человеком.
+    """Предложить передачу диалога живому менеджеру.
+
+    Используй когда не уверен в ответе, не понимаешь запрос, или гость просит связаться с человеком.
+    ВАЖНО: после этого дождись явного согласия гостя ("да", "соедините", "передайте")
+    и только затем вызывай transfer_to_manager_confirmed.
 
     Args:
         reason: Причина передачи менеджеру
     """
-    logger.info(f"Передача менеджеру: {reason}")
+    logger.info(f"Предложение передачи менеджеру: {reason}")
+    return (
+        "MANAGER_TRANSFER_OFFERED: Предложи гостю перевод на менеджера и дождись согласия. "
+        "Если гость согласен, вызови transfer_to_manager_confirmed."
+    )
+
+
+@tool
+def transfer_to_manager_confirmed(reason: str) -> str:
+    """Подтвердить передачу диалога менеджеру после явного согласия гостя.
+
+    Args:
+        reason: Причина передачи менеджеру
+    """
+    logger.info(f"Передача менеджеру подтверждена: {reason}")
     return "ESCALATED: Диалог передан менеджеру"
 
 
-TOOLS = [check_availability, create_booking, cancel_booking, transfer_to_manager]
+@tool
+def retrieve_knowledge(query: str, top_k: int = 7, source: str = "") -> str:
+    """Найти релевантные фрагменты знаний (меню/FAQ/политики) через RAG.
+
+    Args:
+        query: Поисковый запрос
+        top_k: Сколько фрагментов вернуть (рекомендуется 5-7)
+        source: Фильтр по названию документа, например "menu" или "faq"
+    """
+    restaurant = Restaurant.get_or_none(Restaurant.id == 1)
+    if not restaurant:
+        return "RETRIEVAL_STATUS: NO_RESTAURANT"
+
+    top_k = max(1, min(top_k, 10))
+    source_filter = source.strip() or None
+
+    snippets, status = _get_knowledge_manager().retrieve_context(
+        restaurant=restaurant,
+        query=query,
+        top_k=top_k,
+        source_title=source_filter,
+    )
+
+    if not snippets:
+        return f"RETRIEVAL_STATUS: {status}\nRETRIEVED_CONTEXT: []"
+
+    lines = []
+    for idx, item in enumerate(snippets[:top_k], start=1):
+        text = item["content"][:500].replace("\n", " ")
+        lines.append(
+            f"{idx}. score={item['score']:.3f} title={item['title']} source={item['source_path']} text={text}"
+        )
+    return "RETRIEVAL_STATUS: OK\nRETRIEVED_CONTEXT:\n" + "\n".join(lines)
+
+
+TOOLS = [
+    check_availability,
+    create_booking,
+    cancel_booking,
+    retrieve_knowledge,
+    transfer_to_manager,
+    transfer_to_manager_confirmed,
+]

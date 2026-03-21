@@ -16,12 +16,30 @@ cp .env.example .env
 docker compose run --rm app
 ```
 
+Для чистого старта БД/индекса (fresh reset):
+
+```bash
+docker compose down -v
+docker compose run --rm app
+```
+
 ## Функционал
 
 - Общение с LLM от имени менеджера ресторана
-- Бронирование столиков (заглушка)
-- Отмена бронирований (заглушка)
+- RAG по загруженным документам (md/txt/json/pdf) + sample набор в репозитории
+- Управление наборами знаний через CLI-команды
+- Бронирование столиков с интервалом 2 часа и проверкой пересечений
+- Отмена бронирований по `booking_id` (случайный буквенно-цифровой код, 7 символов)
 - Передача диалога менеджеру при необходимости
+
+## CLI-команды
+
+- `/help`
+- `/upload <path> [set_name]`
+- `/list_docs`
+- `/list_sets`
+- `/activate_set <set_id>`
+- `/reindex [set_id]`
 
 ## Структура
 
@@ -29,8 +47,9 @@ docker compose run --rm app
 src/
 ├── config.py     # Конфигурация
 ├── database.py   # Работа с PostgreSQL
-├── models.py     # SQLAlchemy модели
+├── models.py     # Peewee модели
 ├── functions.py  # Function calling инструменты
+├── knowledge.py  # Загрузка и retrieval документов через Qdrant
 ├── prompts.py    # Системный промпт
 ├── llm.py        # Клиент OpenAI
 └── main.py       # CLI интерфейс
