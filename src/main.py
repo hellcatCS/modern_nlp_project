@@ -7,6 +7,13 @@ from src.models import User, Message, Restaurant
 from src.knowledge import KnowledgeManager
 from src.llm import LLMClient
 from src.functions import set_knowledge_manager
+from src.observability import (
+    record_cli_command,
+    record_llm_error,
+    record_user_message,
+    setup_observability,
+)
+from src.config import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +26,15 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("qdrant_client").setLevel(logging.WARNING)
+
+setup_observability()
+
+logger.info(
+    "Конфиг: USE_VLLM_LLM=%s → чат: %s | эмбеддинги RAG: %s",
+    settings.use_vllm_llm,
+    "vLLM (%s)" % settings.vllm_base_url if settings.use_vllm_llm else "OpenAI api.openai.com",
+    "HuggingFace %s" % settings.hf_embedding_model if settings.use_vllm_llm else "OpenAI Embeddings API",
+)
 
 
 def sanitize_text(text: str) -> str:
@@ -67,6 +83,7 @@ class ChatSession:
             return "Пустая команда"
 
         command = parts[0].lower()
+        record_cli_command(command)
 
         if command == "/help":
             return (
@@ -140,6 +157,7 @@ class ChatSession:
         if self.user.is_escalated:
             return "[Диалог передан менеджеру. Ожидайте ответа.]"
 
+        record_user_message()
         self._save_message("user", user_input)
         history = self._get_history()
 
@@ -151,6 +169,7 @@ class ChatSession:
             return response
         except Exception as e:
             logger.error(f"Ошибка LLM: {e}")
+            record_llm_error("chat")
             return "Извините, произошла техническая ошибка. Попробуйте позже."
 
 

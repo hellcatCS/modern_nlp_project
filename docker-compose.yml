@@ -23,32 +23,110 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
   app:
+    # Не стартует при обычном `docker compose up -d` — чтобы не занимать TTY/порт 9090 рядом с `docker compose --profile app run --rm app`.
+    # Фоновый бот: `docker compose --profile app up -d`
+    profiles: ["app"]
     build: .
+    # Все переменные из .env попадают в контейнер (в т.ч. USE_VLLM_LLM).
+    # Не задавайте USE_VLLM_LLM=... в environment с ${...:-false} — это раньше затирало режим vLLM.
+    env_file:
+      - .env
+    # Исходящий интернет (OpenAI API) идёт через сетевой стек хоста. Иначе в bridge-сети
+    # часто errno 101 при запросах к api.openai.com, хотя на ВМ интернет есть.
+    # DB/Qdrant — через порты, проброшенные на localhost (см. db/qdrant ports).
+    network_mode: host
     depends_on:
       db:
         condition: service_healthy
       qdrant:
         condition: service_started
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      # USE_VLLM_LLM, HF_EMBEDDING_MODEL — только из env_file (.env), см. README
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}
+      - VLLM_MODEL_PATH=${VLLM_MODEL_PATH:-/home/aesemikin/models/Qwen3-30B-A3B}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen3-30B-A3B}
+      - VLLM_API_KEY=${VLLM_API_KEY:-EMPTY}
+      - HF_EMBEDDING_MODEL=${HF_EMBEDDING_MODEL:-cointegrated/rubert-tiny2}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openai/gpt-oss-120b}
       - OPENROUTER_EMBEDDING_MODEL=${OPENROUTER_EMBEDDING_MODEL:-openai/text-embedding-3-small}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/restaurant_bot
+      # Не подставлять из .env: в .env часто `qdrant`/`db`, при network_mode:host это не резолвится.
+      - DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5433/restaurant_bot
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
-      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_URL=http://127.0.0.1:6333
       - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-restaurant_knowledge}
       - RAG_TOP_K=${RAG_TOP_K:-4}
       - RAG_MIN_SCORE=${RAG_MIN_SCORE:-0.25}
       - LANG=C.UTF-8
       - LC_ALL=C.UTF-8
       - PYTHONIOENCODING=utf-8
+      - OBSERVABILITY_ENABLED=${OBSERVABILITY_ENABLED:-true}
+      - ELASTICSEARCH_ENABLED=${ELASTICSEARCH_ENABLED:-true}
+      - ELASTICSEARCH_URL=http://127.0.0.1:9200
+      - ELASTICSEARCH_INDEX_PREFIX=${ELASTICSEARCH_INDEX_PREFIX:-restaurant-bot-logs}
+      - PROMETHEUS_METRICS_ENABLED=${PROMETHEUS_METRICS_ENABLED:-true}
+      - PROMETHEUS_METRICS_HOST=0.0.0.0
+      - PROMETHEUS_METRICS_PORT=9090
     stdin_open: true
     tty: true
 
 volumes:
   postgres_data:
   qdrant_data:
+  es_data:
