@@ -122,6 +122,12 @@ vllm serve /path/to/Qwen3-30B-A3B \
 
 `ssh -L 5601:127.0.0.1:5601 -L 3000:127.0.0.1:3000 -L 9091:127.0.0.1:9091 user@сервер`
 
+Примеры: 
+![photo_2026-03-22 22 21 04](https://github.com/user-attachments/assets/8f1ff938-0d74-44cd-bde8-64a228eb2158)
+![photo_2026-03-22 22 21 40](https://github.com/user-attachments/assets/39313b78-83d8-4f36-b864-618038610c1c)
+![photo_2026-03-22 22 21 44](https://github.com/user-attachments/assets/dfeca58d-3e94-43b3-95f3-0bb8d8c196c9)
+
+
 ---
 
 ## 7. Структура проекта
