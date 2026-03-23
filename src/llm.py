@@ -20,7 +20,11 @@ class LLMClient:
         )
         self.llm_with_tools = primary_llm.bind_tools(TOOLS)
         self.fallback_llm_with_tools = None
-        if settings.openrouter_api_key:
+        if (
+            not settings.use_vllm_llm
+            and settings.openrouter_api_key
+            and settings.openai_api_key
+        ):
             fallback_llm = ChatOpenAI(
                 model=settings.openrouter_model,
                 api_key=settings.openrouter_api_key,
@@ -28,6 +32,37 @@ class LLMClient:
             )
             self.fallback_llm_with_tools = fallback_llm.bind_tools(TOOLS)
         self.tools_by_name = {t.name: t for t in TOOLS}
+
+    @staticmethod
+    def _build_chat_model() -> ChatOpenAI:
+        if settings.use_vllm_llm:
+            logger.info(
+                "LLM: vLLM — модель %s, API %s, веса (путь): %s",
+                settings.vllm_model,
+                settings.vllm_base_url,
+                settings.vllm_model_path,
+            )
+            logger.info(
+                "vLLM: для function calling (bind_tools) на сервере нужны "
+                "--enable-auto-tool-choice и --tool-call-parser "
+                "(для Qwen2.5 — hermes; для Qwen3-Coder — qwen3_xml). "
+                "См. README «Локальный чат через vLLM»."
+            )
+            return ChatOpenAI(
+                model=settings.vllm_model,
+                api_key=settings.vllm_api_key,
+                base_url=settings.vllm_base_url,
+            )
+        if settings.openai_api_key:
+            return ChatOpenAI(
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+            )
+        return ChatOpenAI(
+            model=settings.openrouter_model,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+        )
 
     def _invoke_with_fallback(self, messages: list):
         try:
