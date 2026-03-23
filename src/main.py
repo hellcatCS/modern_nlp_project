@@ -33,7 +33,7 @@ logger.info(
     "Конфиг: USE_VLLM_LLM=%s → чат: %s | эмбеддинги RAG: %s",
     settings.use_vllm_llm,
     "vLLM (%s)" % settings.vllm_base_url if settings.use_vllm_llm else "OpenAI api.openai.com",
-    "HuggingFace %s" % settings.hf_embedding_model if settings.use_vllm_llm else "OpenAI Embeddings API",
+    "OpenAI/OpenRouter Embeddings API",
 )
 
 

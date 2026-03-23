@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 
 from langchain_openai import OpenAIEmbeddings
@@ -12,89 +11,39 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from src.config import settings
-from src.local_embeddings import SentenceTransformerEmbeddings, is_openai_geo_blocked_error
 from src.models import KnowledgeSet, KnowledgeDocument, KnowledgeChunk, Restaurant
 
 logger = logging.getLogger(__name__)
 
 
-def _env_flag_true(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _use_hf_embeddings_only() -> bool:
-    """Локальные эмбеддинги: флаг в Settings или прямо USE_VLLM_LLM в окружении (обход багов pydantic/Docker)."""
-    return bool(settings.use_vllm_llm) or _env_flag_true("USE_VLLM_LLM")
-
-
 class KnowledgeManager:
     def __init__(self):
         self.client = QdrantClient(url=settings.qdrant_url, check_compatibility=False)
-        self.embeddings: OpenAIEmbeddings | None = None
-        self.fallback_embeddings = None
-        self._hf_embeddings: SentenceTransformerEmbeddings | None = None
-        self._using_hf = False
-
-        if _use_hf_embeddings_only():
-            logger.info(
-                "Эмбеддинги RAG: только Hugging Face (%s), без OpenAI Embeddings API "
-                "(use_vllm_llm=%s, USE_VLLM_LLM в env=%s).",
-                settings.hf_embedding_model,
-                settings.use_vllm_llm,
-                os.getenv("USE_VLLM_LLM", ""),
-            )
-            self._activate_hf_backend()
-        else:
-            self.embeddings = OpenAIEmbeddings(
-                model=settings.embedding_model,
-                api_key=settings.openai_api_key,
-            )
-            if settings.openrouter_api_key:
-                self.fallback_embeddings = OpenAIEmbeddings(
-                    model=settings.openrouter_embedding_model,
-                    api_key=settings.openrouter_api_key,
-                    base_url=settings.openrouter_base_url,
-                )
-
-    def _activate_hf_backend(self) -> None:
-        if self._hf_embeddings is not None:
-            self._using_hf = True
-            return
-        self._hf_embeddings = SentenceTransformerEmbeddings(settings.hf_embedding_model)
-        self._using_hf = True
-        logger.warning(
-            "Эмбеддинги OpenAI недоступны (ограничение региона). "
-            "Используется локальная модель с Hugging Face: %s",
-            settings.hf_embedding_model,
+        self.embeddings = OpenAIEmbeddings(
+            model=settings.embedding_model,
+            api_key=settings.openai_api_key,
         )
+        self.fallback_embeddings = None
+        if settings.openrouter_api_key:
+            self.fallback_embeddings = OpenAIEmbeddings(
+                model=settings.openrouter_embedding_model,
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+            )
 
     def _embed_documents(self, chunks: list[str]) -> list[list[float]]:
-        if self._using_hf and self._hf_embeddings is not None:
-            return self._hf_embeddings.embed_documents(chunks)
-        assert self.embeddings is not None
         try:
             return self.embeddings.embed_documents(chunks)
         except Exception as primary_error:
-            if is_openai_geo_blocked_error(primary_error) or _env_flag_true("USE_VLLM_LLM"):
-                self._activate_hf_backend()
-                assert self._hf_embeddings is not None
-                return self._hf_embeddings.embed_documents(chunks)
             if self.fallback_embeddings:
                 logger.debug("Primary embeddings failed, trying OpenRouter fallback: %s", primary_error)
                 return self.fallback_embeddings.embed_documents(chunks)
             raise
 
     def _embed_query(self, query: str) -> list[float]:
-        if self._using_hf and self._hf_embeddings is not None:
-            return self._hf_embeddings.embed_query(query)
-        assert self.embeddings is not None
         try:
             return self.embeddings.embed_query(query)
         except Exception as primary_error:
-            if is_openai_geo_blocked_error(primary_error) or _env_flag_true("USE_VLLM_LLM"):
-                self._activate_hf_backend()
-                assert self._hf_embeddings is not None
-                return self._hf_embeddings.embed_query(query)
             if self.fallback_embeddings:
                 logger.debug("Primary query embedding failed, trying OpenRouter fallback: %s", primary_error)
                 return self.fallback_embeddings.embed_query(query)
@@ -143,8 +92,6 @@ class KnowledgeManager:
         return chunks
 
     def _collection_name(self, set_id: int) -> str:
-        if self._using_hf:
-            return f"{settings.qdrant_collection_prefix}_hf_{set_id}"
         return f"{settings.qdrant_collection_prefix}_{set_id}"
 
     def _ensure_collection(self, set_id: int, dimension: int) -> None:
@@ -296,13 +243,9 @@ class KnowledgeManager:
         if not target_set:
             return "Не найден набор знаний для переиндексации"
 
-        # До первого embed режим HF неизвестен — удаляем оба возможных имени коллекции
-        for name in (
-            f"{settings.qdrant_collection_prefix}_{target_set.id}",
-            f"{settings.qdrant_collection_prefix}_hf_{target_set.id}",
-        ):
-            if self.client.collection_exists(name):
-                self.client.delete_collection(name)
+        collection_name = self._collection_name(target_set.id)
+        if self.client.collection_exists(collection_name):
+            self.client.delete_collection(collection_name)
 
         docs = list(
             KnowledgeDocument.select().where(KnowledgeDocument.knowledge_set == target_set)
@@ -353,49 +296,10 @@ class KnowledgeManager:
         if not active:
             return [], "NO_ACTIVE_SET"
 
-        prefix = settings.qdrant_collection_prefix
-        hf_name = f"{prefix}_hf_{active.id}"
-        std_name = f"{prefix}_{active.id}"
-        has_hf = self.client.collection_exists(hf_name)
-        has_std = self.client.collection_exists(std_name)
-
-        if not has_hf and not has_std:
+        collection_name = self._collection_name(active.id)
+        if not self.client.collection_exists(collection_name):
             return [], "NO_INDEX"
-
-        # Индекс HF: только локальный эмбеддер (размерность ≠ OpenAI)
-        if has_hf and not has_std:
-            self._using_hf = True
-            if self._hf_embeddings is None:
-                self._hf_embeddings = SentenceTransformerEmbeddings(settings.hf_embedding_model)
-            collection_name = hf_name
-            vector = self._hf_embeddings.embed_query(query)
-        elif has_std and not has_hf:
-            if settings.use_vllm_llm:
-                logger.error(
-                    "Режим vLLM: в Qdrant только старая коллекция OpenAI-эмбеддингов. "
-                    "Выполните /reindex для активного набора."
-                )
-                return [], "REINDEX_NEEDED_FOR_VLLM"
-            collection_name = std_name
-            self._using_hf = False
-            assert self.embeddings is not None
-            try:
-                vector = self.embeddings.embed_query(query)
-            except Exception as e:
-                if is_openai_geo_blocked_error(e):
-                    logger.error(
-                        "Индекс построен эмбеддингами OpenAI, но API недоступен по региону. "
-                        "Выполните /reindex для набора или удалите коллекцию в Qdrant."
-                    )
-                    return [], "EMBEDDING_REGION_BLOCKED"
-                raise
-        else:
-            # Обе есть — редкий случай; предпочитаем HF
-            self._using_hf = True
-            if self._hf_embeddings is None:
-                self._hf_embeddings = SentenceTransformerEmbeddings(settings.hf_embedding_model)
-            collection_name = hf_name
-            vector = self._hf_embeddings.embed_query(query)
+        vector = self._embed_query(query)
 
         response = self.client.query_points(
             collection_name=collection_name,

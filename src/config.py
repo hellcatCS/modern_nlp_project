@@ -16,8 +16,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # В режиме USE_VLLM_LLM=true: чат → vLLM (VLLM_BASE_URL), эмбеддинги → HF (HF_EMBEDDING_MODEL), без OpenAI API.
-    # Переменная окружения: USE_VLLM_LLM (без validation_alias — надёжнее читается из Docker/env).
+    # В режиме USE_VLLM_LLM=true: чат идёт в локальный vLLM, а RAG-эмбеддинги остаются API-only.
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
@@ -33,8 +32,6 @@ class Settings(BaseSettings):
     openrouter_embedding_model: str = "openai/text-embedding-3-small"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     embedding_model: str = "text-embedding-3-small"
-    # Локальный fallback при блокировке региона OpenAI (скачивается с Hugging Face при первом срабатывании)
-    hf_embedding_model: str = "cointegrated/rubert-tiny2"
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:5433/restaurant_bot"
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection_prefix: str = "restaurant_knowledge"
@@ -67,9 +64,13 @@ class Settings(BaseSettings):
 
         if self.use_vllm_llm:
             return self
+        if (self.openai_api_key or "").strip():
+            return self
+        if (self.openrouter_api_key or "").strip():
+            return self
         if not (self.openai_api_key or "").strip():
             raise ValueError(
-                "Укажите OPENAI_API_KEY в .env или включите USE_VLLM_LLM=true для локального vLLM."
+                "Укажите OPENAI_API_KEY или OPENROUTER_API_KEY в .env, либо включите USE_VLLM_LLM=true для локального vLLM."
             )
         return self
 
