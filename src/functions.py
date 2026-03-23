@@ -232,20 +232,13 @@ def cancel_booking(booking_id: str) -> str:
 
 @tool
 def transfer_to_manager(reason: str) -> str:
-    """Предложить передачу диалога живому менеджеру.
-
-    Используй когда не уверен в ответе, не понимаешь запрос, или гость просит связаться с человеком.
-    ВАЖНО: после этого дождись явного согласия гостя ("да", "соедините", "передайте")
-    и только затем вызывай transfer_to_manager_confirmed.
+    """Передать сложный вопрос на ручную обработку.
 
     Args:
         reason: Причина передачи менеджеру
     """
-    logger.info(f"Предложение передачи менеджеру: {reason}")
-    return (
-        "MANAGER_TRANSFER_OFFERED: Предложи гостю перевод на менеджера и дождись согласия. "
-        "Если гость согласен, вызови transfer_to_manager_confirmed."
-    )
+    logger.info(f"Передача менеджеру: {reason}")
+    return "ESCALATED: Уточню, вернусь с ответом)"
 
 
 @tool
@@ -256,7 +249,7 @@ def transfer_to_manager_confirmed(reason: str) -> str:
         reason: Причина передачи менеджеру
     """
     logger.info(f"Передача менеджеру подтверждена: {reason}")
-    return "ESCALATED: Диалог передан менеджеру"
+    return "ESCALATED: Уточню, вернусь с ответом)"
 
 
 @tool

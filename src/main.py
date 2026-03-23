@@ -138,7 +138,7 @@ class ChatSession:
 
     def process_message(self, user_input: str) -> str:
         if self.user.is_escalated:
-            return "[Диалог передан менеджеру. Ожидайте ответа.]"
+            return "Уточню, вернусь с ответом)"
 
         self._save_message("user", user_input)
         history = self._get_history()
