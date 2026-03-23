@@ -77,8 +77,6 @@ async def handler(event):
     data["history"] = trim_history(history)
 
     try:
-        await asyncio.sleep(1.0)
-
         loop = asyncio.get_running_loop()
         reply, new_state = await loop.run_in_executor(
             None,

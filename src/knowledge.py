@@ -19,12 +19,19 @@ logger = logging.getLogger(__name__)
 class KnowledgeManager:
     def __init__(self):
         self.client = QdrantClient(url=settings.qdrant_url, check_compatibility=False)
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.embedding_model,
-            api_key=settings.openai_api_key,
-        )
+        if settings.openai_api_key:
+            self.embeddings = OpenAIEmbeddings(
+                model=settings.embedding_model,
+                api_key=settings.openai_api_key,
+            )
+        else:
+            self.embeddings = OpenAIEmbeddings(
+                model=settings.openrouter_embedding_model,
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+            )
         self.fallback_embeddings = None
-        if settings.openrouter_api_key:
+        if settings.openrouter_api_key and settings.openai_api_key:
             self.fallback_embeddings = OpenAIEmbeddings(
                 model=settings.openrouter_embedding_model,
                 api_key=settings.openrouter_api_key,

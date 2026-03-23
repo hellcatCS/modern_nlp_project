@@ -20,7 +20,11 @@ class LLMClient:
         primary_llm = self._build_chat_model()
         self.llm_with_tools = primary_llm.bind_tools(TOOLS)
         self.fallback_llm_with_tools = None
-        if not settings.use_vllm_llm and settings.openrouter_api_key:
+        if (
+            not settings.use_vllm_llm
+            and settings.openrouter_api_key
+            and settings.openai_api_key
+        ):
             fallback_llm = ChatOpenAI(
                 model=settings.openrouter_model,
                 api_key=settings.openrouter_api_key,
@@ -49,9 +53,15 @@ class LLMClient:
                 api_key=settings.vllm_api_key,
                 base_url=settings.vllm_base_url,
             )
+        if settings.openai_api_key:
+            return ChatOpenAI(
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+            )
         return ChatOpenAI(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
+            model=settings.openrouter_model,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
         )
 
     def _invoke_with_fallback(self, messages: list):
