@@ -48,12 +48,13 @@ docker compose run --rm app
 
 ```
 src/
-├── config.py     # Конфигурация
-├── database.py   # Работа с PostgreSQL
-├── models.py     # Peewee модели
-├── functions.py  # Function calling инструменты
-├── knowledge.py  # Загрузка и retrieval документов через Qdrant
-├── prompts.py    # Системный промпт
-├── llm.py        # Клиент OpenAI
-└── main.py       # CLI интерфейс
+├── config.py         # Настройки (Pydantic)
+├── database.py     # Подключение к PostgreSQL
+├── models.py         # модели
+├── functions.py      # Инструменты LangChain (tools)
+├── knowledge.py      # RAG: Qdrant, эмбеддинги
+├── prompts.py        # Системный промпт
+├── llm.py            # Клиент чата (OpenAI-совместимый)
+├── observability.py  # Elasticsearch, Prometheus
+└── main.py           # Точка входа, CLI, сессия
 ```
