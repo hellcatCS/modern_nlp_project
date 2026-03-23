@@ -136,7 +136,7 @@ vllm serve /path/to/Qwen3-30B-A3B \
 src/
 ├── config.py         # Настройки (Pydantic)
 ├── database.py     # Подключение к PostgreSQL
-├── models.py         # Peewee-модели
+├── models.py         # модели
 ├── functions.py      # Инструменты LangChain (tools)
 ├── knowledge.py      # RAG: Qdrant, эмбеддинги
 ├── prompts.py        # Системный промпт
