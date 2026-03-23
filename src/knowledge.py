@@ -30,25 +30,24 @@ class KnowledgeManager:
                 api_key=settings.openrouter_api_key,
                 base_url=settings.openrouter_base_url,
             )
-        self._embedding_size = 1536
 
     def _embed_documents(self, chunks: list[str]) -> list[list[float]]:
         try:
             return self.embeddings.embed_documents(chunks)
         except Exception as primary_error:
-            if not self.fallback_embeddings:
-                raise primary_error
-            logger.debug("Primary embeddings failed, trying OpenRouter fallback: %s", primary_error)
-            return self.fallback_embeddings.embed_documents(chunks)
+            if self.fallback_embeddings:
+                logger.debug("Primary embeddings failed, trying OpenRouter fallback: %s", primary_error)
+                return self.fallback_embeddings.embed_documents(chunks)
+            raise
 
     def _embed_query(self, query: str) -> list[float]:
         try:
             return self.embeddings.embed_query(query)
         except Exception as primary_error:
-            if not self.fallback_embeddings:
-                raise primary_error
-            logger.debug("Primary query embedding failed, trying OpenRouter fallback: %s", primary_error)
-            return self.fallback_embeddings.embed_query(query)
+            if self.fallback_embeddings:
+                logger.debug("Primary query embedding failed, trying OpenRouter fallback: %s", primary_error)
+                return self.fallback_embeddings.embed_query(query)
+            raise
 
     def _read_document(self, file_path: Path) -> tuple[str, str]:
         if not file_path.exists():
@@ -297,8 +296,8 @@ class KnowledgeManager:
         collection_name = self._collection_name(active.id)
         if not self.client.collection_exists(collection_name):
             return [], "NO_INDEX"
-
         vector = self._embed_query(query)
+
         response = self.client.query_points(
             collection_name=collection_name,
             query=vector,

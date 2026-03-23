@@ -20,6 +20,15 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("qdrant_client").setLevel(logging.WARNING)
 
+setup_observability()
+
+logger.info(
+    "Конфиг: USE_VLLM_LLM=%s → чат: %s | эмбеддинги RAG: %s",
+    settings.use_vllm_llm,
+    "vLLM (%s)" % settings.vllm_base_url if settings.use_vllm_llm else "OpenAI api.openai.com",
+    "OpenAI/OpenRouter Embeddings API",
+)
+
 
 def sanitize_text(text: str) -> str:
     return text.encode('utf-8', errors='surrogateescape').decode('utf-8', errors='replace')
