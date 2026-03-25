@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: restaurant_bot
+    metrics_path: /metrics
+    static_configs:
+      # app с network_mode:host слушает /metrics на хосте; из контейнера Prometheus — host.docker.internal
+      - targets:
+          - host.docker.internal:9090
